@@ -21,24 +21,39 @@ services:
       timeout: 10s
       retries: 3
 
-  redis:
-    image: redis:latest
+  # browserless:
+  #   image: ${BROWSERLESS_IMAGE:-ghcr.io/browserless/chromium:latest}
+  #   restart: unless-stopped
+  #   networks:
+  #     - printer_network
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   environment:
+  #     - QUEUED=10
+  #     - HEALTH=true
+  #     - CONCURRENT=5
+  #     - TOKEN=${BROWSERLESS_TOKEN:-change-me}
+  #   healthcheck:
+  #     test: ["CMD-SHELL", 'curl -f "http://localhost:3000/pressure?token=${BROWSERLESS_TOKEN:-change-me}"']
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 10
+
+  # As an alternative to browserless, you can also use a lightweight image like chromedp/headless-shell:latest
+  # See https://docs.rxresu.me/self-hosting/docker#alternative-printer-options for more information.
+  chrome:
+    image: chromedp/headless-shell:latest
     restart: unless-stopped
-    command: redis-server --appendonly yes
     networks:
-      - data_network
-    # Not exposed on the host by default. Redis can contain agent stream data
-    # including user chat content; keep it internal to the Docker network.
-    # Uncomment the ports block below if you need host access for tooling.
-    # ports:
-    #   - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      start_period: 5s
-      interval: 30s
-      timeout: 10s
+      - printer_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9222:9222"
+    healthcheck: # <--- THIS IS THE NEW BLOCK
+      test: ["CMD", "curl", "-f", "http://localhost:9222/status"]
+      interval: 10s # Check every 10 seconds
+      timeout: 5s # Give it up to 5 seconds to respond
       retries: 3
 
   seaweedfs:
@@ -89,6 +104,12 @@ services:
       - "3000:3000"
     environment:
       - APP_URL=http://localhost:3000
+      - PRINTER_APP_URL=http://host.docker.internal:3000
+      # - PRINTER_APP_URL=http://localhost:9222
+      # Printer
+      # - PRINTER_ENDPOINT=ws://browserless:3000?token=${BROWSERLESS_TOKEN:-change-me}
+      - PRINTER_ENDPOINT=http://chrome:9222 # Or, if you're using chromedp/headless-shell
+      # Database
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres
       - AUTH_SECRET=change-me-to-a-secure-secret-key-in-production
       - S3_ACCESS_KEY_ID=seaweedfs
@@ -103,10 +124,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      seaweedfs:
-        condition: service_healthy
+      # browserless:
+      #   condition: service_healthy
+      # chrome:
+      #   condition: service_healthy
       seaweedfs_create_bucket:
         condition: service_completed_successfully
     healthcheck:
